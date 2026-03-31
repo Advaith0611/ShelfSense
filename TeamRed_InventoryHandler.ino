@@ -7,7 +7,6 @@
     - SHEETS_WEBHOOK_URL
   Install MFRC522v2 library (or adjust includes to your MFRC522 library) and use ESP32 core for Arduino.
 */
-// ===== ADD THIS INCLUDE =====
 #include <WiFiClientSecure.h>
 #include <WiFi.h>
 #include <WebServer.h>
@@ -48,6 +47,7 @@ struct Product {
   String name;
   int quantity;
   int threshold;
+  unsigned long lastAlertTime = 0; // NEW
 };
 
 struct AuditEntry {
@@ -99,24 +99,59 @@ int findProductIndexByUID(const String &uid) {
 // ===== Networking helpers =====
 void sendTelegram(const String &text) {
   if (strlen(TELEGRAM_TOKEN) < 10) return;
-  String url = String("https://api.telegram.org/bot" ) + TELEGRAM_TOKEN + "/sendMessage";
+
+  WiFiClientSecure client;
+  client.setInsecure();  // required for ESP32 HTTPS
+
+  HTTPClient http;
+  String url = String("https://api.telegram.org/bot") + TELEGRAM_TOKEN + "/sendMessage";
+
   int attempts = 0;
-  const int maxAttempts = 3;
-  while (attempts < maxAttempts) {
+
+  while (attempts < 3) {
     attempts++;
-    HTTPClient http;
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json" );
-    String payloadText = text;
-    payloadText.replace("\\", "\\\\" );
-    payloadText.replace("\"", "\\\"" );
-    payloadText.replace("\n", "\\n" );
-    String payload = "{\"chat_id\":\"" + String(TELEGRAM_CHAT_ID) + "\",\"text\":\"" + payloadText + "\"}";
-    int code = http.POST(payload);
+
+    Serial.println("[TELEGRAM] Sending...");
+
+    if (!http.begin(client, url)) {
+      Serial.println("[TELEGRAM] Begin failed");
+      delay(500);
+      continue;
+    }
+
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+    String encodedText = text;
+    encodedText.replace("%", "%25");
+    encodedText.replace("&", "%26");
+    encodedText.replace("=", "%3D");
+    encodedText.replace("\n", "%0A");
+
+    String payload = String("chat_id=") + TELEGRAM_CHAT_ID + "&text=" + encodedText;
+
+    int httpCode = http.POST(payload);
+
+    Serial.print("[TELEGRAM] Code: ");
+    Serial.println(httpCode);
+
+    if (httpCode > 0) {
+      String response = http.getString();
+      Serial.println(response);
+
+      if (httpCode == 200) {
+        Serial.println("[TELEGRAM] SUCCESS");
+        http.end();
+        return;
+      }
+    } else {
+      Serial.println(http.errorToString(httpCode));
+    }
+
     http.end();
-    if (code == 200) return;
-    delay(700);
+    delay(1000);
   }
+
+  Serial.println("[TELEGRAM] FAILED");
 }
 
 void postToSheets(const AuditEntry &e) {
@@ -654,12 +689,17 @@ void loop() {
         }
       }
       lastScanQuantity = p.quantity;
-      if (p.quantity <= 0 || p.quantity < p.threshold) {
-        updateAlertLED();
-        sendBelowThresholdNotification(p);
-      } else {
-        updateAlertLED();
-      }
+      if ((p.quantity <= 0 || p.quantity < p.threshold)) {
+  updateAlertLED();
+
+  if (millis() - p.lastAlertTime > 600) { // 1 min cooldown
+    sendBelowThresholdNotification(p);
+    p.lastAlertTime = millis();
+  }
+
+} else {
+  updateAlertLED();
+}
     } else {
       lastScanKnown = false;
       lastScanProductName = "";
