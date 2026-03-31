@@ -7,7 +7,8 @@
     - SHEETS_WEBHOOK_URL
   Install MFRC522v2 library (or adjust includes to your MFRC522 library) and use ESP32 core for Arduino.
 */
-
+// ===== ADD THIS INCLUDE =====
+#include <WiFiClientSecure.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <HTTPClient.h>
@@ -23,7 +24,7 @@ const char* WIFI_SSID = "Advaith";
 const char* WIFI_PASS = "12345678";
 
 const char* TELEGRAM_TOKEN = "8729945437:AAEEXaisA1a-ODOaxZg2lJqeKQQHj5eWuZI";
-const long TELEGRAM_CHAT_ID = 871442400; // replace with your chat id
+const long TELEGRAM_CHAT_ID = 8714424008; // replace with your chat id
 
 const char* SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxLWF37FQtUbLfsIjAHQMs_NW0OsXi-JIbhgS13lkrShIWNQtSKajeas5bOyXa5Bx9p/exec";
 
