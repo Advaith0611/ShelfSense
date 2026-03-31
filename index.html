@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ESP32 Inventory</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; background:#1e1e2f; color:#fff; padding:16px; margin:0; }
+    .card { background:#2a2a40; padding:14px; border-radius:10px; margin-bottom:12px; box-shadow:0 2px 6px rgba(0,0,0,0.4); }
+    .mono { font-family:monospace; }
+    label.field { display:block; font-size:13px; margin-top:8px; color:#dfe6ff; }
+    .row { display:flex; gap:8px; }
+    .col { flex:1; }
+    button { padding:8px 12px; border:none; border-radius:6px; background:#3498db; color:white; cursor:pointer; }
+    input, select, textarea { padding:8px; width:100%; margin-top:6px; border-radius:6px; border:none; box-sizing:border-box; background:#1b1b2b; color:#fff; }
+    small.hint { color:#bfc7ff; display:block; margin-top:6px; font-size:12px; }
+    .muted { color:#9aa3d6; font-size:13px; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; }
+    th, td { text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,0.04); font-size:13px; }
+    th { color:#cfe3ff; font-weight:600; }
+  </style>
+</head>
+
+<body>
+
+<div class="card">
+  <h2>ESP32 Inventory</h2>
+  <div class="row">
+    <div class="col">
+      <label class="field">Mode</label>
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="modeSwitch" onchange="toggleMode()"> <span class="muted">Increment Mode</span>
+        </label>
+        <div style="margin-left:auto" id="modeText" class="muted">-</div>
+      </div>
+      <small class="hint">Toggle to switch between adding and removing stock.</small>
+    </div>
+    <div class="col" style="max-width:220px;">
+      <label class="field">Alert LED</label>
+      <div id="ledStatus" class="muted">Status: normal</div>
+      <small class="hint">LED indicates any item below threshold.</small>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Last Scan</h3>
+  <label class="field">UID</label>
+  <div id="lastUid" class="mono">-</div>
+
+  <label class="field">Known</label>
+  <div id="lastKnown" class="muted">-</div>
+
+  <label class="field">Product Name</label>
+  <div id="lastName" class="muted">-</div>
+
+  <label class="field">Quantity</label>
+  <div id="lastQty" class="muted">-</div>
+
+  <label class="field">Message</label>
+  <div id="lastMsg" class="muted"></div>
+</div>
+
+<div class="card" id="addBox" style="display:none;">
+  <h3>Add New Product</h3>
+
+  <label class="field">Scanned UID</label>
+  <div id="newUid" class="mono">-</div>
+
+  <label class="field" for="newName">Product name</label>
+  <input id="newName" type="text" placeholder="e.g., Widget A" required>
+
+  <div class="row">
+    <div class="col">
+      <label class="field" for="newQty">Initial quantity</label>
+      <input id="newQty" type="number" min="0" value="1">
+    </div>
+    <div class="col">
+      <label class="field" for="newThreshold">Minimum threshold</label>
+      <input id="newThreshold" type="number" min="0" value="1">
+    </div>
+  </div>
+
+  <label class="field" for="newNote">Note (optional)</label>
+  <input id="newNote" type="text" placeholder="e.g., location, batch">
+
+  <div style="margin-top:10px;">
+    <button onclick="addProduct()">Add product</button>
+    <button style="background:#6c757d;margin-left:8px;" onclick="hideAddBox()">Cancel</button>
+  </div>
+  <small class="hint">All fields are required except Note. UID is filled from last scan.</small>
+</div>
+
+<div class="card">
+  <h3>Inventory</h3>
+  <div id="inventory" class="muted">loading...</div>
+  <small class="hint">Click an item in the table to prefill quick actions (future enhancement).</small>
+</div>
+
+<div class="card">
+  <h3>Quick Actions</h3>
+  <div class="row">
+    <div class="col">
+      <label class="field">Manual UID (optional)</label>
+      <input id="manualUid" type="text" placeholder="paste UID to act on specific item">
+    </div>
+    <div style="width:140px;">
+      <label class="field">Amount</label>
+      <input id="manualAmt" type="number" value="1" min="1">
+    </div>
+  </div>
+  <div style="margin-top:8px;">
+    <button onclick="manualAdjust(true)">Increment</button>
+    <button style="background:#e74c3c;margin-left:8px;" onclick="manualAdjust(false)">Decrement</button>
+  </div>
+  <small class="hint">Use manual controls when you don't want to scan a tag.</small>
+</div>
+
+<div class="card">
+  <h3>Schedule Summary</h3>
+
+  <label class="field" for="freq">Frequency</label>
+  <select id="freq">
+    <option value="none">None</option>
+    <option value="weekly">Weekly</option>
+    <option value="monthly">Monthly</option>
+  </select>
+
+  <div class="row">
+    <div class="col">
+      <label class="field" for="wd">Weekday (1=Sun..7=Sat)</label>
+      <input id="wd" type="number" min="1" max="7" value="1">
+    </div>
+    <div class="col">
+      <label class="field" for="hr">Hour (0-23)</label>
+      <input id="hr" type="number" min="0" max="23" value="9">
+    </div>
+    <div class="col">
+      <label class="field" for="mn">Minute (0-59)</label>
+      <input id="mn" type="number" min="0" max="59" value="0">
+    </div>
+  </div>
+
+  <div style="margin-top:10px;">
+    <button onclick="setSchedule()">Set schedule</button>
+    <button style="background:#6c757d;margin-left:8px;" onclick="clearSchedule()">Clear</button>
+  </div>
+  <small class="hint">Scheduled summary will be sent via Telegram and logged to Sheets.</small>
+</div>
+
+<script>
+function toggleMode() {
+  const m = document.getElementById('modeSwitch').checked ? 'increment' : 'decrement';
+  fetch('/setmode?m=' + encodeURIComponent(m)).catch(()=>{});
+  document.getElementById('modeText').innerText = m;
+}
+
+function addProduct() {
+  const uid = document.getElementById('newUid').innerText.trim();
+  const name = encodeURIComponent(document.getElementById('newName').value.trim());
+  const qty = encodeURIComponent(document.getElementById('newQty').value);
+  const threshold = encodeURIComponent(document.getElementById('newThreshold').value);
+  const note = encodeURIComponent(document.getElementById('newNote').value || '');
+  if (!uid || uid === '-' ) { alert('No UID available. Scan a tag first.'); return; }
+  if (!name) { alert('Enter product name'); return; }
+  fetch('/add?uid=' + uid + '&name=' + name + '&qty=' + qty + '&threshold=' + threshold + '&note=' + note)
+    .then(() => { hideAddBox(); poll(); });
+}
+
+function hideAddBox() {
+  document.getElementById('addBox').style.display = 'none';
+}
+
+function setSchedule() {
+  const f = document.getElementById('freq').value;
+  const wd = document.getElementById('wd').value;
+  const hr = document.getElementById('hr').value;
+  const mn = document.getElementById('mn').value;
+  fetch('/setschedule?freq=' + encodeURIComponent(f) + '&wd=' + encodeURIComponent(wd) + '&hr=' + encodeURIComponent(hr) + '&mn=' + encodeURIComponent(mn))
+    .then(()=> alert('Schedule updated')).catch(()=>alert('Schedule update failed'));
+}
+
+function clearSchedule() {
+  fetch('/setschedule?freq=none&wd=1&hr=0&mn=0').then(()=>alert('Schedule cleared')).catch(()=>alert('Failed'));
+}
+
+function manualAdjust(isIncrement) {
+  const uid = document.getElementById('manualUid').value.trim();
+  const amt = parseInt(document.getElementById('manualAmt').value) || 1;
+  if (!uid) { alert('Enter UID or scan a tag first'); return; }
+  // call server endpoint to perform manual adjust (server should implement /manual?uid=&amt=&op=)
+  const op = isIncrement ? 'inc' : 'dec';
+  fetch('/manual?uid=' + encodeURIComponent(uid) + '&amt=' + amt + '&op=' + op)
+    .then(()=> poll())
+    .catch(()=> alert('Manual adjust failed'));
+}
+
+function poll() {
+  fetch('/status')
+  .then(r => r.json())
+  .then(d => {
+    document.getElementById('modeText').innerText = d.mode;
+    document.getElementById('modeSwitch').checked = (d.mode === 'increment');
+
+    document.getElementById('lastUid').innerText = d.lastUid || '-';
+    document.getElementById('lastKnown').innerText = d.lastKnown ? 'yes' : 'no';
+    document.getElementById('lastName').innerText = d.lastName || '-';
+    document.getElementById('lastQty').innerText = (d.lastQty !== null && d.lastQty !== undefined) ? d.lastQty : '-';
+    document.getElementById('lastMsg').innerText = d.lastMsg || '';
+
+    document.getElementById('inventory').innerHTML = d.inventoryHtml || '<div class="muted">No items</div>';
+
+    // show add box when unknown UID scanned
+    if (!d.lastKnown && d.lastUid) {
+      document.getElementById('addBox').style.display = 'block';
+      document.getElementById('newUid').innerText = d.lastUid;
+    } else {
+      document.getElementById('addBox').style.display = 'none';
+    }
+
+    // update schedule UI
+    if (d.schedule) {
+      document.getElementById('freq').value = d.schedule.freq || 'none';
+      document.getElementById('wd').value = d.schedule.weekday || 1;
+      document.getElementById('hr').value = d.schedule.hour || 9;
+      document.getElementById('mn').value = d.schedule.minute || 0;
+    }
+
+    // LED status (if server provides)
+    if (d.led) {
+      document.getElementById('ledStatus').innerText = 'Status: ' + d.led;
+    }
+  })
+  .catch(err => {
+    console.log('poll error', err);
+  });
+}
+
+setInterval(poll, 2000);
+window.onload = poll;
+</script>
+
+</body>
+</html>
